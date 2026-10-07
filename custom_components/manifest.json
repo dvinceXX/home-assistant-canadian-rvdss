@@ -1,0 +1,10 @@
+{
+  "domain": "canadian_rvdss",
+  "name": "Canadian RVDSS",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/dvinceXX/home-assistant-canadian-rvdss",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "requirements": []
+}
