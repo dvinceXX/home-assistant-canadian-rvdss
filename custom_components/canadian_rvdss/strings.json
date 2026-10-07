@@ -1,0 +1,15 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Canadian Respiratory Virus Surveillance",
+        "description": "Configure the PHAC Respiratory Virus Detection Surveillance System data source.",
+        "data": {
+          "geo_type": "Geography type",
+          "geo_value": "Geography",
+          "scan_interval": "Update interval (hours)"
+        }
+      }
+    }
+  }
+}
