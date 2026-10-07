@@ -9,11 +9,17 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .coordinator import RvdssCoordinator
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+]
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(
+    hass: HomeAssistant,
+    config: dict,
+) -> bool:
     """Set up the Canadian RVDSS integration."""
+    hass.data.setdefault(DOMAIN, {})
     return True
 
 
@@ -22,14 +28,29 @@ async def async_setup_entry(
     entry: ConfigEntry,
 ) -> bool:
     """Set up Canadian RVDSS from a config entry."""
-    coordinator = RvdssCoordinator(hass, entry)
+
+    coordinator = RvdssCoordinator(
+        hass,
+        entry,
+    )
+
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    hass.data.setdefault(
+        DOMAIN,
+        {},
+    )[entry.entry_id] = coordinator
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(
+        entry,
+        PLATFORMS,
+    )
 
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    entry.async_on_unload(
+        entry.add_update_listener(
+            _async_update_listener
+        )
+    )
 
     return True
 
@@ -38,8 +59,10 @@ async def _async_update_listener(
     hass: HomeAssistant,
     entry: ConfigEntry,
 ) -> None:
-    """Reload when options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Reload when configuration changes."""
+    await hass.config_entries.async_reload(
+        entry.entry_id
+    )
 
 
 async def async_unload_entry(
@@ -47,12 +70,16 @@ async def async_unload_entry(
     entry: ConfigEntry,
 ) -> bool:
     """Unload a config entry."""
+
     unload_ok = await hass.config_entries.async_unload_platforms(
         entry,
         PLATFORMS,
     )
 
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data[DOMAIN].pop(
+            entry.entry_id,
+            None,
+        )
 
     return unload_ok

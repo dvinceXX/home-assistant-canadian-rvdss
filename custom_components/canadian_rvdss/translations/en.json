@@ -3,10 +3,16 @@
     "step": {
       "user": {
         "title": "Canadian Respiratory Virus Surveillance",
-        "description": "Configure the PHAC Respiratory Virus Detection Surveillance System data source.",
+        "description": "Select the type of geography you want to monitor.",
         "data": {
-          "geo_type": "Geography type",
-          "geo_value": "Geography",
+          "geo_type": "Geography type"
+        }
+      },
+      "geography": {
+        "title": "Select location",
+        "description": "Select the RVDSS location to monitor. Ontario, Quebec and British Columbia are published as RVDSS regions rather than provinces.",
+        "data": {
+          "geo_value": "Location",
           "scan_interval": "Update interval (hours)"
         }
       }

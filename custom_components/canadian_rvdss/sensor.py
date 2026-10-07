@@ -24,6 +24,7 @@ from .const import (
     ATTR_TESTS,
     ATTR_TIME_VALUE,
     DOMAIN,
+    SOURCE_NAME,
     VIRUSES,
 )
 from .coordinator import RvdssCoordinator
@@ -31,7 +32,11 @@ from .coordinator import RvdssCoordinator
 
 def _normalise(value: str) -> str:
     """Normalise a column name."""
-    return re.sub(r"[^a-z0-9]", "", value.lower())
+    return re.sub(
+        r"[^a-z0-9]",
+        "",
+        value.lower(),
+    )
 
 
 def _find_column(
@@ -46,14 +51,19 @@ def _find_column(
     }
 
     for prefix in prefixes:
-        candidate = _normalise(prefix) + suffix
+        candidate = (
+            _normalise(prefix)
+            + suffix
+        )
 
         if candidate in normalised:
             return normalised[candidate]
 
     for normalised_name, original in normalised.items():
         if any(
-            normalised_name.startswith(_normalise(prefix))
+            normalised_name.startswith(
+                _normalise(prefix)
+            )
             for prefix in prefixes
         ) and normalised_name.endswith(suffix):
             return original
@@ -67,7 +77,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up RVDSS sensors."""
-    coordinator: RvdssCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: RvdssCoordinator = (
+        hass.data[DOMAIN][entry.entry_id]
+    )
 
     row = coordinator.data["row"]
     columns = list(row.keys())
@@ -98,12 +110,12 @@ async def async_setup_entry(
 
         entities.append(
             CanadianRvdssSensor(
-                coordinator,
-                virus_id,
-                virus["name"],
-                pct_column,
-                tests_column,
-                positive_column,
+                coordinator=coordinator,
+                virus_id=virus_id,
+                virus_name=virus["name"],
+                pct_column=pct_column,
+                tests_column=tests_column,
+                positive_column=positive_column,
             )
         )
 
@@ -137,20 +149,45 @@ class CanadianRvdssSensor(
         self.tests_column = tests_column
         self.positive_column = positive_column
 
+        safe_geo_type = re.sub(
+            r"[^a-z0-9_]",
+            "_",
+            coordinator.geo_type.lower(),
+        )
+
+        safe_geo_value = re.sub(
+            r"[^a-z0-9_]",
+            "_",
+            coordinator.geo_value.lower(),
+        )
+
         self._attr_unique_id = (
-            f"canadian_rvdss_"
-            f"{coordinator.geo_type}_"
-            f"{coordinator.geo_value}_"
+            f"{DOMAIN}_"
+            f"{safe_geo_type}_"
+            f"{safe_geo_value}_"
             f"{virus_id}"
-        ).lower().replace(" ", "_")
+        )
 
         self._attr_name = virus_name
 
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.entry.entry_id)},
-            name=f"Canadian RVDSS - {coordinator.geo_value}",
-            manufacturer="Public Health Agency of Canada",
-            model="Respiratory Virus Detection Surveillance System",
+            identifiers={
+                (
+                    DOMAIN,
+                    coordinator.entry.entry_id,
+                )
+            },
+            name=(
+                f"Canadian RVDSS - "
+                f"{coordinator.geo_value.upper()}"
+            ),
+            manufacturer=(
+                "Public Health Agency of Canada"
+            ),
+            model=(
+                "Respiratory Virus Detection "
+                "Surveillance System"
+            ),
             configuration_url=(
                 "https://health-infobase.canada.ca/"
                 "respiratory-virus-surveillance/"
@@ -164,7 +201,12 @@ class CanadianRvdssSensor(
 
         value = row.get(self.pct_column)
 
-        if value in (None, "", "NA", "N/A"):
+        if value in (
+            None,
+            "",
+            "NA",
+            "N/A",
+        ):
             return None
 
         try:
@@ -173,27 +215,30 @@ class CanadianRvdssSensor(
             return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any]:
+    def extra_state_attributes(
+        self,
+    ) -> dict[str, Any]:
         """Return surveillance metadata."""
         data = self.coordinator.data
         row = data["row"]
 
         attributes: dict[str, Any] = {
-            ATTR_EPIWEEK: row.get("epiweek"),
-            ATTR_TIME_VALUE: row.get("time_value"),
-            ATTR_ISSUE: row.get("issue"),
-            ATTR_GEO_TYPE: row.get("geo_type"),
-            ATTR_GEO_VALUE: row.get("geo_value"),
-            ATTR_SEASON: data.get("season"),
-            ATTR_PERCENT_POSITIVE: row.get(self.pct_column),
-            ATTR_SOURCE: (
-                "Public Health Agency of Canada "
-                "Respiratory Virus Detection Surveillance System"
+            ATTR_EPIWEEK: row.get(ATTR_EPIWEEK),
+            ATTR_TIME_VALUE: row.get(ATTR_TIME_VALUE),
+            ATTR_ISSUE: row.get(ATTR_ISSUE),
+            ATTR_GEO_TYPE: row.get(ATTR_GEO_TYPE),
+            ATTR_GEO_VALUE: row.get(ATTR_GEO_VALUE),
+            ATTR_SEASON: data.get(ATTR_SEASON),
+            ATTR_PERCENT_POSITIVE: row.get(
+                self.pct_column
             ),
+            ATTR_SOURCE: SOURCE_NAME,
         }
 
         if self.tests_column:
-            attributes[ATTR_TESTS] = row.get(self.tests_column)
+            attributes[ATTR_TESTS] = row.get(
+                self.tests_column
+            )
 
         if self.positive_column:
             attributes[ATTR_POSITIVE_TESTS] = row.get(

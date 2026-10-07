@@ -1,10 +1,11 @@
 {
   "domain": "canadian_rvdss",
-  "name": "Canadian RVDSS",
+  "name": "Canadian Respiratory Virus Surveillance",
   "codeowners": [],
   "config_flow": true,
   "documentation": "https://github.com/dvinceXX/home-assistant-canadian-rvdss",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "requirements": []
+  "requirements": [],
+  "version": "1.0.0"
 }

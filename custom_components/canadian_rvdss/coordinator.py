@@ -12,12 +12,17 @@ from aiohttp import ClientError
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.update_coordinator import (
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
 
 from .const import (
     CONF_GEO_TYPE,
     CONF_GEO_VALUE,
     CONF_SCAN_INTERVAL,
+    DATA_URL_TEMPLATE,
     REPOSITORY_API_URL,
 )
 
@@ -39,7 +44,10 @@ class RvdssCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.geo_type = entry.data[CONF_GEO_TYPE]
         self.geo_value = entry.data[CONF_GEO_VALUE]
 
-        interval = entry.data.get(CONF_SCAN_INTERVAL, 24)
+        interval = entry.data.get(
+            CONF_SCAN_INTERVAL,
+            24,
+        )
 
         super().__init__(
             hass,
@@ -50,89 +58,126 @@ class RvdssCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch and process RVDSS data."""
+        session = async_get_clientsession(self.hass)
+
         try:
-            async with self.hass.helpers.aiohttp.async_get_clientsession().get(
+            async with session.get(
                 REPOSITORY_API_URL,
                 headers={"Accept": "application/vnd.github+json"},
             ) as response:
                 if response.status != 200:
                     raise UpdateFailed(
-                        f"GitHub repository lookup failed: HTTP {response.status}"
+                        "Unable to retrieve RVDSS season list: "
+                        f"HTTP {response.status}"
                     )
 
                 seasons = await response.json()
 
-            season_names = [
-                item["name"]
-                for item in seasons
-                if item.get("type") == "dir"
-                and item["name"].startswith("season_")
-            ]
-
-            if not season_names:
-                raise UpdateFailed("No RVDSS seasons found.")
-
-            season_names.sort(reverse=True)
-
-            session = (
-                self.hass.helpers.aiohttp.async_get_clientsession()
+            season_names = sorted(
+                (
+                    item["name"]
+                    for item in seasons
+                    if item.get("type") == "dir"
+                    and item.get("name", "").startswith("season_")
+                ),
+                reverse=True,
             )
 
-            rows: list[dict[str, str]] = []
-            selected_season = None
+            if not season_names:
+                raise UpdateFailed(
+                    "No RVDSS surveillance seasons were found."
+                )
 
             for season in season_names:
-                csv_url = (
-                    "https://raw.githubusercontent.com/"
-                    "dajmcdon/rvdss-canada/main/data/"
-                    f"{season}/positive_tests.csv"
+                result = await self._fetch_season(
+                    session,
+                    season,
                 )
 
-                async with session.get(csv_url) as response:
-                    if response.status != 200:
-                        continue
+                if result:
+                    rows, selected_season = result
+                    return self._process_rows(
+                        rows,
+                        selected_season,
+                    )
 
-                    text = await response.text()
+            raise UpdateFailed(
+                "No RVDSS data was found for "
+                f"{self.geo_type}={self.geo_value}"
+            )
 
-                reader = csv.DictReader(io.StringIO(text))
-
-                season_rows = list(reader)
-
-                matching = [
-                    row
-                    for row in season_rows
-                    if self._matches_location(row)
-                ]
-
-                if matching:
-                    rows = matching
-                    selected_season = season
-                    break
-
-            if not rows:
-                raise UpdateFailed(
-                    f"No RVDSS data found for "
-                    f"{self.geo_type}={self.geo_value}"
-                )
-
-            return self._process_rows(rows, selected_season)
+        except UpdateFailed:
+            raise
 
         except (ClientError, OSError, ValueError) as err:
+            _LOGGER.exception(
+                "Unable to retrieve RVDSS data",
+            )
             raise UpdateFailed(
                 f"Unable to retrieve RVDSS data: {err}"
             ) from err
 
-    def _matches_location(self, row: dict[str, str]) -> bool:
-        """Check whether a row matches the configured geography."""
-        row_geo_type = (row.get("geo_type") or "").strip().lower()
-        row_geo_value = (row.get("geo_value") or "").strip().lower()
+    async def _fetch_season(
+        self,
+        session,
+        season: str,
+    ) -> tuple[list[dict[str, str]], str] | None:
+        """Download and filter one surveillance season."""
+        csv_url = DATA_URL_TEMPLATE.format(
+            season=season,
+        )
 
-        wanted_type = self.geo_type.strip().lower()
-        wanted_value = self.geo_value.strip().lower()
+        try:
+            async with session.get(csv_url) as response:
+                if response.status != 200:
+                    _LOGGER.debug(
+                        "Could not retrieve %s: HTTP %s",
+                        csv_url,
+                        response.status,
+                    )
+                    return None
+
+                text = await response.text()
+
+        except (ClientError, OSError) as err:
+            _LOGGER.debug(
+                "Could not retrieve RVDSS season %s: %s",
+                season,
+                err,
+            )
+            return None
+
+        reader = csv.DictReader(
+            io.StringIO(text),
+        )
+
+        matching = [
+            row
+            for row in reader
+            if self._matches_location(row)
+        ]
+
+        if not matching:
+            return None
+
+        return matching, season
+
+    def _matches_location(
+        self,
+        row: dict[str, str],
+    ) -> bool:
+        """Check whether a row matches the configured geography."""
+        row_geo_type = (
+            row.get("geo_type") or ""
+        ).strip().lower()
+
+        row_geo_value = (
+            row.get("geo_value") or ""
+        ).strip().lower()
 
         return (
-            row_geo_type == wanted_type
-            and row_geo_value == wanted_value
+            row_geo_type == self.geo_type.strip().lower()
+            and row_geo_value == self.geo_value.strip().lower()
         )
 
     def _process_rows(
@@ -140,11 +185,14 @@ class RvdssCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         rows: list[dict[str, str]],
         season: str | None,
     ) -> dict[str, Any]:
-        """Select the latest revision for each epidemiological week."""
+        """Select the newest revision of the newest epidemiological week."""
+
         grouped: dict[str, dict[str, str]] = {}
 
         for row in rows:
-            epiweek = (row.get("epiweek") or "").strip()
+            epiweek = (
+                row.get("epiweek") or ""
+            ).strip()
 
             if not epiweek:
                 continue
@@ -155,16 +203,27 @@ class RvdssCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 grouped[epiweek] = row
                 continue
 
-            old_issue = existing.get("issue", "")
-            new_issue = row.get("issue", "")
+            old_issue = (
+                existing.get("issue") or ""
+            ).strip()
 
-            if new_issue >= old_issue:
+            new_issue = (
+                row.get("issue") or ""
+            ).strip()
+
+            if new_issue > old_issue:
                 grouped[epiweek] = row
 
         if not grouped:
-            raise UpdateFailed("RVDSS returned no usable observations.")
+            raise UpdateFailed(
+                "RVDSS returned no usable observations."
+            )
 
-        latest_epiweek = max(grouped)
+        latest_epiweek = max(
+            grouped,
+            key=self._epiweek_sort_key,
+        )
+
         latest = grouped[latest_epiweek]
 
         return {
@@ -173,3 +232,12 @@ class RvdssCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "geo_type": self.geo_type,
             "geo_value": self.geo_value,
         }
+
+    @staticmethod
+    def _epiweek_sort_key(epiweek: str) -> tuple[int, int]:
+        """Sort epidemiological week values safely."""
+        try:
+            value = int(epiweek)
+            return value // 100, value % 100
+        except ValueError:
+            return 0, 0
